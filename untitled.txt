@@ -1,0 +1,209 @@
+FT_travail
+/* server.js - مشروع FT travail
+   يستقبل الطلبات، يحفظ البيانات، يرسل البريد والواتساب تلقائي */
+const express = require('express');
+const multer = require('multer');
+const path = require('path');
+const bodyParser = require('body-parser');
+const nodemailer = require('nodemailer');
+const basicAuth = require('express-basic-auth');
+const fs = require('fs');
+const cors = require('cors');
+const twilio = require('twilio');
+const Database = require('better-sqlite3');
+
+// إعداد السيرفر
+const app = express();
+app.use(cors());
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use(express.static(path.join(__dirname, 'public')));
+
+// قاعدة بيانات
+const db = new Database('db.sqlite');
+db.prepare(`CREATE TABLE IF NOT EXISTS applicants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    firstname TEXT,
+    lastname TEXT,
+    address TEXT,
+    country TEXT,
+    birthdate TEXT,
+    education TEXT,
+    email TEXT,
+    whatsapp TEXT,
+    idFront TEXT,
+    idBack TEXT,
+    status TEXT
+)`).run();
+
+// إعدادات ملفات الهوية
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, 'uploads/'),
+    filename: (req, file, cb) => cb(null, Date.now() + '_' + file.originalname)
+});
+const upload = multer({ storage });
+
+// قراءة متغيرات البيئة
+require('dotenv').config();
+const ADMIN_USER = process.env.ADMIN_USER || 'admin';
+const ADMIN_PASS = process.env.ADMIN_PASS || 'admin';
+const PORT = process.env.PORT || 10000;
+
+// SMTP
+const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: process.env.SMTP_PORT,
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+    }
+});
+
+// Twilio
+const client = twilio(process.env.TWILIO_SID, process.env.TWILIO_TOKEN);
+
+// استمارة التقديم
+app.post('/apply', upload.fields([{name:'idFront'},{name:'idBack'}]), (req,res)=>{
+    const files = req.files;
+    const body = req.body;
+    db.prepare(`INSERT INTO applicants (firstname, lastname, address, country, birthdate, education, email, whatsapp, idFront, idBack, status)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(body.firstname, body.lastname, body.address, body.country, body.birthdate, body.education, body.email, body.whatsapp,
+        files.idFront[0].filename, files.idBack[0].filename, 'pending');
+    res.redirect('/thanks.html');
+});
+
+// لوحة الإدارة
+app.use('/admin.html', basicAuth({users:{[ADMIN_USER]:ADMIN_PASS}, challenge:true}));
+
+app.get('/api/applicants', (req,res)=>{
+    const rows = db.prepare('SELECT * FROM applicants').all();
+    res.json(rows);
+});
+
+app.post('/api/applicants/:id/status', (req,res)=>{
+    const {status} = req.body;
+    const id = req.params.id;
+    const applicant = db.prepare('SELECT * FROM applicants WHERE id=?').get(id);
+    if(!applicant) return res.status(404).send('Applicant not found');
+    db.prepare('UPDATE applicants SET status=? WHERE id=?').run(status,id);
+
+    // إرسال بريد
+    let subject, text;
+    if(status==='accepted'){
+        subject = 'تهانينا — قبول طلب التوظيف';
+        text = `تهانينا ${applicant.firstname}! أنت مقبول في العمل معنا. سنتواصل معك على الواتساب خلال 24 ساعة.`;
+        // إرسال واتساب
+        if(applicant.whatsapp && process.env.TWILIO_SID){
+            client.messages.create({
+                from: 'whatsapp:' + process.env.TWILIO_WHATSAPP_FROM,
+                to: 'whatsapp:' + applicant.whatsapp,
+                body: text
+            });
+        }
+    }else{
+        subject = 'نتيجة طلب التوظيف';
+        text = `مرحبًا ${applicant.firstname}, نعتذر، أنت غير مؤهل للعمل معنا.`;
+    }
+
+    transporter.sendMail({
+        from: process.env.EMAIL_FROM,
+        to: applicant.email,
+        subject,
+        text
+    });
+    res.send('Status updated');
+});
+
+app.listen(PORT, ()=>console.log('Server running on port '+PORT));
+{
+  "name": "ft-travail-app",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^8.4.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "multer": "^1.4.5-lts.1",
+    "nodemailer": "^6.9.4",
+    "express-basic-auth": "^1.2.0",
+    "body-parser": "^1.20.2",
+    "twilio": "^4.6.0"
+  }
+}
+PORT=10000
+ADMIN_USER=admin
+ADMIN_PASS=كلمة_سر_قوية
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your-email@gmail.com
+SMTP_PASS=كلمة_مرور_التطبيق
+EMAIL_FROM="FT travail <your-email@gmail.com>"
+TWILIO_SID=xxxxxxxxxxxxxxxxxxxx
+TWILIO_TOKEN=xxxxxxxxxxxxxxxxxxxx
+TWILIO_WHATSAPP_FROM=+1415xxxxxxx
+public
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+<meta charset="UTF-8">
+<title>تقديم طلب وظيفة - FT travail</title>
+</head>
+<body>
+<h2>نموذج طلب الوظيفة</h2>
+<form action="/apply" method="post" enctype="multipart/form-data">
+  الاسم: <input type="text" name="firstname" required><br>
+  اللقب: <input type="text" name="lastname" required><br>
+  العنوان الحالي: <input type="text" name="address" required><br>
+  البلد: <input type="text" name="country" required><br>
+  تاريخ الولادة: <input type="date" name="birthdate" required><br>
+  المستوى التعليمي: <input type="text" name="education" required><br>
+  الايميل: <input type="email" name="email" required><br>
+  رقم الواتساب: <input type="text" name="whatsapp"><br>
+  صورة الهوية (الجهة الأمامية): <input type="file" name="idFront" accept="image/*" required><br>
+  صورة الهوية (الجهة الخلفية): <input type="file" name="idBack" accept="image/*" required><br>
+  <button type="submit">إرسال الطلب</button>
+</form>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="ar">
+<head><meta charset="UTF-8"><title>شكراً</title></head>
+<body>
+<h2>تم استلام طلبك</h2>
+<p>طلبكم تحت الدراسة، في ظرف أقل من 24 ساعة سيتم الإجابة على الإيميل، شكراً.</p>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="ar">
+<head><meta charset="UTF-8"><title>لوحة الإدارة</title></head>
+<body>
+<h2>لوحة الإدارة - FT travail</h2>
+<div id="applicants"></div>
+<script>
+async function loadApplicants(){
+  const res = await fetch('/api/applicants');
+  const data = await res.json();
+  const div = document.getElementById('applicants');
+  div.innerHTML = '';
+  data.forEach(a=>{
+    div.innerHTML += `<p>${a.firstname} ${a.lastname} - ${a.email} - <button onclick="update(${a.id},'accepted')">قبول</button> <button onclick="update(${a.id},'rejected')">رفض</button></p>`;
+  });
+}
+async function update(id,status){
+  await fetch('/api/applicants/'+id+'/status',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status})});
+  loadApplicants();
+}
+loadApplicants();
+</script>
+</body>
+</html>
+uploads
+هذا المجلد لحفظ الصور المرفوعة من المتقدمين
