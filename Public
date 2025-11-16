@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+<meta charset="UTF-8">
+<title>تقديم طلب وظيفة - FT travail</title>
+</head>
+<body>
+<h2>نموذج طلب الوظيفة</h2>
+<form action="/apply" method="post" enctype="multipart/form-data">
+  الاسم: <input type="text" name="firstname" required><br>
+  اللقب: <input type="text" name="lastname" required><br>
+  العنوان الحالي: <input type="text" name="address" required><br>
+  البلد: <input type="text" name="country" required><br>
+  تاريخ الولادة: <input type="date" name="birthdate" required><br>
+  المستوى التعليمي: <input type="text" name="education" required><br>
+  الايميل: <input type="email" name="email" required><br>
+  رقم الواتساب: <input type="text" name="whatsapp"><br>
+  صورة الهوية (الجهة الأمامية): <input type="file" name="idFront" accept="image/*" required><br>
+  صورة الهوية (الجهة الخلفية): <input type="file" name="idBack" accept="image/*" required><br>
+  <button type="submit">إرسال الطلب</button>
+</form>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="ar">
+<head><meta charset="UTF-8"><title>شكراً</title></head>
+<body>
+<h2>تم استلام طلبك</h2>
+<p>طلبكم تحت الدراسة، في ظرف أقل من 24 ساعة سيتم الإجابة على الإيميل، شكراً.</p>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="ar">
+<head><meta charset="UTF-8"><title>لوحة الإدارة</title></head>
+<body>
+<h2>لوحة الإدارة - FT travail</h2>
+<div id="applicants"></div>
+<script>
+async function loadApplicants(){
+  const res = await fetch('/api/applicants');
+  const data = await res.json();
+  const div = document.getElementById('applicants');
+  div.innerHTML = '';
+  data.forEach(a=>{
+    div.innerHTML += `<p>${a.firstname} ${a.lastname} - ${a.email} - <button onclick="update(${a.id},'accepted')">قبول</button> <button onclick="update(${a.id},'rejected')">رفض</button></p>`;
+  });
+}
+async function update(id,status){
+  await fetch('/api/applicants/'+id+'/status',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status})});
+  loadApplicants();
+}
+loadApplicants();
+</script>
+</body>
+</html>
